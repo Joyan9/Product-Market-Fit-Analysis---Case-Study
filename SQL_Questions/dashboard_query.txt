@@ -1,0 +1,328 @@
+# MASTER DASHBOARD DATASET
+
+conn.execute("""
+
+-- Step 1: Calculate comprehensive AQI metrics by city
+WITH city_aqi_metrics AS (
+    SELECT
+        area,
+        state,
+        -- Overall metrics
+        COUNT(*) AS total_monitoring_days,
+        AVG(aqi_value) AS avg_aqi,
+        MAX(aqi_value) AS max_aqi_ever,
+        STDDEV(aqi_value) AS aqi_volatility,
+        
+        -- Bad air day metrics
+        COUNT(CASE 
+            WHEN air_quality_status IN ('Poor', 'Very Poor', 'Severe') 
+            THEN 1 END) AS bad_days,
+        COUNT(CASE 
+            WHEN air_quality_status IN ('Poor', 'Very Poor', 'Severe') 
+            THEN 1 END) * 100.0 / COUNT(*) AS pct_bad_days,
+        
+        -- Crisis day metrics (Very Poor + Severe only)
+        COUNT(CASE 
+            WHEN air_quality_status IN ('Very Poor', 'Severe') 
+            THEN 1 END) AS crisis_days,
+        COUNT(CASE 
+            WHEN air_quality_status IN ('Very Poor', 'Severe') 
+            THEN 1 END) * 100.0 / COUNT(*) AS pct_crisis_days,
+        
+        -- Pollutant diversity (more pollutants = more complex problem)
+        COUNT(DISTINCT prominent_pollutants) AS unique_pollutant_combinations,
+        
+        -- Seasonal breakdown
+        AVG(CASE 
+            WHEN EXTRACT('month' FROM date) IN (11,12,1,2) 
+            THEN aqi_value END) AS winter_avg_aqi,
+        AVG(CASE 
+            WHEN EXTRACT('month' FROM date) IN (3,4,5,6) 
+            THEN aqi_value END) AS summer_avg_aqi,
+        AVG(CASE 
+            WHEN EXTRACT('month' FROM date) IN (7,8,9,10) 
+            THEN aqi_value END) AS monsoon_avg_aqi,
+            
+        -- Winter severity (key selling season)
+        COUNT(CASE 
+            WHEN EXTRACT('month' FROM date) IN (11,12,1,2)
+            AND air_quality_status IN ('Poor', 'Very Poor', 'Severe')
+            THEN 1 END) * 100.0 / 
+        NULLIF(COUNT(CASE 
+            WHEN EXTRACT('month' FROM date) IN (11,12,1,2)
+            THEN 1 END), 0) AS winter_pct_bad_days
+        
+    FROM air_quality
+    GROUP BY area, state
+),
+
+-- Step 2: Calculate year-over-year trend (FIXED)
+city_trends AS (
+
+    -- First compute yearly averages
+    WITH yearly_avg AS (
+        SELECT
+            area,
+            state,
+            EXTRACT('year' FROM date) AS year,
+            AVG(aqi_value) AS avg_aqi
+        FROM air_quality
+        GROUP BY area, state, EXTRACT('year' FROM date)
+    ),
+
+    year_bounds AS (
+        SELECT
+            area,
+            state,
+            MIN(year) AS first_year,
+            MAX(year) AS last_year
+        FROM yearly_avg
+        GROUP BY area, state
+    )
+
+    SELECT
+        yb.area,
+        yb.state,
+        yb.first_year,
+        yb.last_year,
+        y1.avg_aqi AS early_aqi,
+        y2.avg_aqi AS recent_aqi
+    FROM year_bounds yb
+    LEFT JOIN yearly_avg y1
+        ON yb.area = y1.area
+        AND yb.state = y1.state
+        AND yb.first_year = y1.year
+    LEFT JOIN yearly_avg y2
+        ON yb.area = y2.area
+        AND yb.state = y2.state
+        AND yb.last_year = y2.year
+),
+
+-- Step 3: Get state population (latest year available)
+state_population AS (
+    SELECT
+        state,
+        AVG(CASE WHEN gender = 'Total' THEN value * 1000 END) AS state_population
+    FROM population_data
+    WHERE year = (SELECT MAX(year) FROM population_data)
+    GROUP BY state
+),
+
+-- Step 4: Vehicle registrations as wealth proxy
+-- More vehicles per capita = higher income
+state_vehicle_metrics AS (
+    SELECT
+        state,
+        -- Total vehicles registered (latest year)
+        SUM(CASE WHEN year = (SELECT MAX(year) FROM vehicle_registrations) THEN value END) AS total_vehicles,
+        
+        -- Electric/Hybrid vehicles as % of total (environmental awareness proxy)
+        SUM(CASE 
+            WHEN year = (SELECT MAX(year) FROM vehicle_registrations)
+            AND fuel IN ('ELECTRIC', 'HYBRID', 'PURE EV')
+            THEN value END) * 100.0 / 
+        NULLIF(SUM(CASE WHEN year = (SELECT MAX(year) FROM vehicle_registrations) THEN value END), 0) 
+            AS pct_ev_vehicles,
+        
+        -- Motor cars as % (wealth indicator)
+        SUM(CASE 
+            WHEN year = (SELECT MAX(year) FROM vehicle_registrations)
+            AND vehicle_class = 'MOTOR CAR'
+            THEN value END) * 100.0 / 
+        NULLIF(SUM(CASE WHEN year = (SELECT MAX(year) FROM vehicle_registrations) THEN value END), 0) 
+            AS pct_motor_cars
+            
+    FROM vehicle_registrations
+    GROUP BY state
+),
+
+-- Step 5: Respiratory disease burden
+-- Aggregate respiratory diseases by state
+state_disease_burden AS (
+    SELECT
+        state,
+        SUM(cases) AS total_respiratory_cases,
+        SUM(deaths) AS total_respiratory_deaths,
+        COUNT(DISTINCT district) AS affected_districts,
+        
+        -- Case fatality rate
+        SUM(deaths) * 100.0 / NULLIF(SUM(cases), 0) AS case_fatality_rate
+        
+    FROM disease_data
+    WHERE LOWER(disease_illness_name) LIKE '%respiratory%'
+       OR LOWER(disease_illness_name) LIKE '%pneumonia%'
+       OR LOWER(disease_illness_name) LIKE '%asthma%'
+       OR LOWER(disease_illness_name) LIKE '%bronch%'
+       OR LOWER(disease_illness_name) LIKE '%ari%'  -- Acute Respiratory Infection
+    GROUP BY state
+),
+
+-- Step 6: Combine everything
+master_dataset AS (
+    SELECT
+        -- City identifiers
+        a.area AS city,
+        a.state,
+        
+        -- AQI Severity Metrics
+        ROUND(a.avg_aqi, 1) AS avg_aqi,
+        ROUND(a.max_aqi_ever, 1) AS max_aqi,
+        ROUND(a.pct_bad_days, 2) AS pct_bad_days,
+        ROUND(a.pct_crisis_days, 2) AS pct_crisis_days,
+        ROUND(a.aqi_volatility, 1) AS aqi_volatility,
+        
+        -- Seasonal patterns
+        ROUND(a.winter_avg_aqi, 1) AS winter_avg_aqi,
+        ROUND(a.summer_avg_aqi, 1) AS summer_avg_aqi,
+        ROUND(a.monsoon_avg_aqi, 1) AS monsoon_avg_aqi,
+        ROUND(a.winter_pct_bad_days, 2) AS winter_pct_bad_days,
+        
+        -- Trend analysis
+        t.first_year,
+        t.last_year,
+        ROUND(t.early_aqi, 1) AS early_aqi,
+        ROUND(t.recent_aqi, 1) AS recent_aqi,
+        ROUND(t.recent_aqi - t.early_aqi, 1) AS aqi_change,
+        CASE 
+            WHEN t.recent_aqi - t.early_aqi > 20 THEN 'Worsening'
+            WHEN t.recent_aqi - t.early_aqi < -20 THEN 'Improving'
+            ELSE 'Stable'
+        END AS trend_direction,
+        
+        -- Market size metrics
+        p.state_population,
+        ROUND(p.state_population / 1000000.0, 2) AS population_millions,
+        
+        -- Wealth/Income proxies
+        v.total_vehicles,
+        ROUND(v.total_vehicles * 1000.0 / NULLIF(p.state_population, 0), 2) AS vehicles_per_1000_people,
+        ROUND(v.pct_ev_vehicles, 2) AS pct_ev_vehicles,
+        ROUND(v.pct_motor_cars, 2) AS pct_motor_cars,
+        
+        -- Health burden
+        COALESCE(d.total_respiratory_cases, 0) AS respiratory_cases,
+        COALESCE(d.total_respiratory_deaths, 0) AS respiratory_deaths,
+        ROUND(COALESCE(d.case_fatality_rate, 0), 2) AS case_fatality_rate,
+        
+        -- Data quality
+        a.total_monitoring_days,
+        CASE 
+            WHEN a.total_monitoring_days >= 1000 THEN 'High'
+            WHEN a.total_monitoring_days >= 500 THEN 'Medium'
+            ELSE 'Low'
+        END AS data_reliability
+        
+    FROM city_aqi_metrics a
+    LEFT JOIN city_trends t ON a.area = t.area AND a.state = t.state
+    LEFT JOIN state_population p ON a.state = p.state
+    LEFT JOIN state_vehicle_metrics v ON a.state = v.state
+    LEFT JOIN state_disease_burden d ON a.state = d.state
+),
+
+-- Step 7: Calculate composite scores
+scored_dataset AS (
+    SELECT
+        *,
+        
+        -- AQI Severity Score (0-100)
+        -- Weighted: avg AQI (40%) + % bad days (40%) + volatility (20%)
+        ROUND(
+            (LEAST(avg_aqi / 3.0, 100) * 0.4) +  -- Max at 300 AQI
+            (pct_bad_days * 0.4) +
+            (LEAST(aqi_volatility / 1.0, 100) * 0.2)  -- Max at 100 stddev
+        , 1) AS aqi_severity_score,
+        
+        -- Market Attractiveness Score (0-100)
+        -- Based on population and wealth proxies
+        ROUND(
+            (LEAST(population_millions / 50.0 * 100, 100) * 0.5) +  -- Max at 50M
+            (LEAST(vehicles_per_1000_people / 500.0 * 100, 100) * 0.3) +  -- Max at 500 per 1000
+            (LEAST(pct_motor_cars / 50.0 * 100, 100) * 0.2)  -- Max at 50%
+        , 1) AS market_attractiveness_score,
+        
+        -- Health Impact Score (0-100)
+        -- Respiratory burden relative to population
+        ROUND(
+            LEAST(
+                (respiratory_cases * 100000.0 / NULLIF(state_population, 0)) * 10,  -- Cases per 100k
+                100
+            )
+        , 1) AS health_impact_score,
+        
+        -- Urgency Score (0-100)
+        -- Trend worsening + winter severity
+        ROUND(
+            (CASE 
+                WHEN aqi_change > 50 THEN 100
+                WHEN aqi_change > 30 THEN 80
+                WHEN aqi_change > 10 THEN 60
+                WHEN aqi_change > 0 THEN 40
+                ELSE 20
+            END * 0.5) +
+            (winter_pct_bad_days * 0.5)
+        , 1) AS urgency_score
+        
+    FROM master_dataset
+)
+
+-- Step 8: Calculate final composite priority score and tier
+SELECT
+    *,
+    
+    -- COMPOSITE PRIORITY SCORE (weighted average)
+    ROUND(
+        (aqi_severity_score * 0.35) +        -- Air quality is most important
+        (market_attractiveness_score * 0.25) +  -- Market size matters
+        (urgency_score * 0.25) +              -- Worsening trends create urgency
+        (health_impact_score * 0.15)          -- Health burden validates need
+    , 1) AS composite_priority_score,
+    
+    -- Priority Tier (for filtering in dashboard)
+    CASE 
+        WHEN (
+            (aqi_severity_score * 0.35) +
+            (market_attractiveness_score * 0.25) +
+            (urgency_score * 0.25) +
+            (health_impact_score * 0.15)
+        ) >= 70 THEN 'Tier 1 - Launch Cities'
+        WHEN (
+            (aqi_severity_score * 0.35) +
+            (market_attractiveness_score * 0.25) +
+            (urgency_score * 0.25) +
+            (health_impact_score * 0.15)
+        ) >= 50 THEN 'Tier 2 - Early Expansion'
+        WHEN (
+            (aqi_severity_score * 0.35) +
+            (market_attractiveness_score * 0.25) +
+            (urgency_score * 0.25) +
+            (health_impact_score * 0.15)
+        ) >= 30 THEN 'Tier 3 - Future Opportunity'
+        ELSE 'Tier 4 - Low Priority'
+    END AS priority_tier,
+    
+    -- Estimated annual health cost impact (in rupees)
+    -- Assumptions: 
+    -- - ₹10,000 avg treatment cost per respiratory case
+    -- - Scale by AQI severity
+    ROUND(
+        respiratory_cases * 10000 * (avg_aqi / 150.0)
+    ) AS estimated_annual_health_cost,
+    
+    -- Market size estimate (addressable households)
+    -- Assumptions:
+    -- - Avg household size: 4.5 people
+    -- - Only cities with >40% bad days have real demand
+    -- - 25% of households can afford (₹15-25K product)
+    CASE 
+        WHEN pct_bad_days >= 40 THEN 
+            ROUND(state_population / 4.5 * 0.25)
+        WHEN pct_bad_days >= 20 THEN 
+            ROUND(state_population / 4.5 * 0.10)
+        ELSE 0
+    END AS addressable_households
+
+FROM scored_dataset
+WHERE total_monitoring_days >= 365  -- At least 1 year of data
+ORDER BY composite_priority_score DESC
+
+""").fetch_df().to_csv('master_dashboard_dataset.csv', index=False)
