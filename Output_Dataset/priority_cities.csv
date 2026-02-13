@@ -1,0 +1,13 @@
+area,state,avg_aqi,pct_bad_days,severe_days,pop_millions,vehicles_millions,risk_score,tier
+Delhi,Delhi,216.0,51.4,164,21.97,0.18,36.8,Launch Priority
+Ghaziabad,Uttar Pradesh,213.0,49.3,188,3.09,0.99,33.1,Launch Priority
+Bhiwadi,Rajasthan,206.0,49.4,59,0.14,0.36,32.2,Launch Priority
+Greater Noida,Uttar Pradesh,206.0,47.2,109,0.13,0.99,31.4,Launch Priority
+Faridabad,Haryana,200.0,44.9,165,2.13,0.25,30.3,Launch Priority
+Gurugram,Haryana,189.0,42.4,34,1.36,0.25,28.5,Launch Priority
+Patna,Bihar,187.0,41.9,97,2.82,0.33,28.4,Launch Priority
+Muzaffarpur,Bihar,185.0,41.8,112,0.54,0.33,27.9,Launch Priority
+Singrauli,Madhya Pradesh,177.0,40.1,6,0.28,0.39,26.7,Launch Priority
+Chhapra,Bihar,186.0,40.5,23,,0.33,,Launch Priority
+NOIDA,Uttar Pradesh,200.0,43.9,130,,0.99,,Launch Priority
+Baghpat,Uttar Pradesh,187.0,40.4,54,,0.99,,Launch Priority

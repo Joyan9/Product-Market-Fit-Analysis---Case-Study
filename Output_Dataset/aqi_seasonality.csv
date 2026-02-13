@@ -1,0 +1,7 @@
+segment,season,avg_pct_bad,avg_aqi,num_cities
+High Risk Cities,Monsoon,21.5,139.0,19
+High Risk Cities,Summer,41.0,189.0,18
+High Risk Cities,Winter,81.1,284.0,18
+All India,Monsoon,4.065659059469923,77.96546935001915,290
+All India,Summer,8.169963155040435,104.93367577758839,294
+All India,Winter,25.243230257073996,151.0858821217573,290

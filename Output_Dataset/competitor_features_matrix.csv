@@ -1,0 +1,7 @@
+brand,model,price_range,has_hepa,has_carbon,has_pm25_sensor,has_app,has_auto_mode,has_sleep_mode,cadr_range,market_position
+Xiaomi,Air Purifier 4 Lite,11-13k,1,0,1,1,1,1,300+,Budget
+Honeywell,Air Touch V1,8-10k,1,1,0,0,1,0,300-350,Budget
+Coway,AirMega 150,16-19k,1,1,0,0,1,0,250-300,Mid
+Philips,AC1711,16-20k,1,0,1,0,1,1,350-400,Mid
+Dyson,TP10,38-55k,1,0,1,1,1,1,500+,Premium
+AirPure,Premium (Planned),18-22k,1,1,1,1,1,1,350+,Mid-Premium
